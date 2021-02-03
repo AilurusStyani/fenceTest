@@ -1,12 +1,10 @@
 % environment: Matlab R2017a+, Psychtoolbox 3, Eyelink
-%
-clear all STARDATA
-close all
-
-global TRIALINFO
-global SCREEN
-global GL
-global FRUSTUM
+clear global STARDATA
+global TRIALINFO;
+global SCREEN;
+global GL;
+global FRUSTUM;
+global STARDATA;
 
 subjectName = inputdlg({'Please input participant''s initials.'},'Subject Name',1,{''},'on');
 if isempty(subjectName)
@@ -19,42 +17,67 @@ curdir = pwd;
 
 %% PARAMETERS
 % for SCREEN
-SCREEN.distance = 0.6;% m
+SCREEN.distance = 60;% cm
 
-TRIALINFO.deviation = 0.063; % initial binocular deviation, m
-deviationAdjust     = 0.002; % how fast to adjust the deviation by key pressing, m
+TRIALINFO.deviation = 6.3; % initial binocular deviation, m
+deviationAdjust     = 0.2; % how fast to adjust the deviation by key pressing, m
 
-TRIALINFO.fenceWidth = 0.1;  % m
-TRIALINFO.fenceInterval = 0.1; % m
+TRIALINFO.fenceWidth = 5;  % cm
+TRIALINFO.fenceInterval = 5; % cm
+fenceModifySpeed = 1;
 
-% for SCREEN
-SCREEN.distance = 0.6;% m
+% for movement
+initialPosition = [0 0 0];
+velocity = [0 0 0];
+TRIALINFO.acceleration   = [1 0 0];
+
+initialBallPosition = [0 0 -200];
+ballVelocity = [0 0 0];
+ballSize = 10; % cm
+starSize = 0.8; % cm
+TRIALINFO.ballAcceleration = [1 1 0];
+
+TRIALINFO.maxVelocity = 10;
+TRIALINFO.movingBox = [-100 100];
+
+Fence3D = false;
+eyelinkMode = false; % 1/ture: eyelink will be in recording; 0/false: eyelink is not on call
 
 % set keyboard
 KbName('UnifyKeyNames');
-skipKey   = KbName('space');
+skipKey   = KbName('space'); % change a photo
 escape    = KbName('ESCAPE');
 leftKey   = KbName('LeftArrow');
 rightKey  = KbName('RightArrow');
-upArror   = KbName('UpArrow');
+upArror   = KbName('UpArrow'); % position set to 0
 cKey      = KbName('c'); % force calibration, temporally not in use
-enter     = KbName('Return');
+enterKey = KbName('Return'); % stop all
 ballUpKey = KbName('w');
 ballDownKey = KbName('s');
 ballRightKey = KbName('a');
 ballLeftKey = KbName('d');
-2DFenceKey = KbName('2@');
-3DFenceKey = KbName('3#');
+Fence2DKey = KbName('2@');
+Fence3DKey = KbName('3#');
 fenceWidthIncrease = KbName('.>');
 fenceWidthDecrease = KbName(',<');
-
+markerKey = KbName('m');
 pageUp = KbName('pageup'); % increase binocular deviation
 pageDown = KbName('pagedown'); % decrease binocular deviation
 
-eyelinkMode = false; % 1/ture: eyelink is in recording; 0/false: eyelink is not on call
+metrixNum = 0;
+markerNum = 0;
+position = initialPosition;
+ballPosition = initialBallPosition;
+starMetrix = StarMetrix();
+metrix = starMetrix{mod(metrixNum,length(starMetrix))+1};
+CalculateBall(metrix,ballPosition,ballSize,starSize);
 
 %% Initial OpenGL
-Screen('Preference', 'SkipSyncTests', 0); % for recording
+if eyelinkMode
+    Screen('Preference', 'SkipSyncTests', 0); % for recording
+else
+    Screen('Preference', 'SkipSyncTests', 1);
+end
 
 AssertOpenGL;
 InitializeMatlabOpenGL;
@@ -64,6 +87,7 @@ if max(Screen('Screens')) > 1
 else
     SCREEN.screenId = max(Screen('Screens'));
 end
+
 PsychImaging('PrepareConfiguration');
 
 % Define background color:
@@ -72,16 +96,25 @@ blackBackground = BlackIndex(SCREEN.screenId);
 
 % Open a double-buffered full-screen window on the main displays screen.
 [win , winRect] = PsychImaging('OpenWindow', SCREEN.screenId, blackBackground);
+
 SCREEN.widthPix = winRect(3);
 SCREEN.heightPix = winRect(4);
 SCREEN.center = [SCREEN.widthPix/2, SCREEN.heightPix/2];
 
 [width, height] = Screen('DisplaySize', SCREEN.screenId);
-SCREEN.widthM = width/1000; % mm to m
-SCREEN.heightM = height/1000; % mm to m
+SCREEN.widthM = width/10; % mm to cm
+SCREEN.heightM = height/10; % mm to cm
 
 SCREEN.refreshRate = Screen('NominalFrameRate', SCREEN.screenId);
+
 calculateFrustum();
+% calculateCondition();
+
+Screen('BeginOpenGL', win);
+% Enable proper occlusion handling via depth tests:
+glEnable(GL.DEPTH_TEST);
+glClear;
+Screen('EndOpenGL', win);
 
 %% initial eyelink
 if eyelinkMode
@@ -132,7 +165,7 @@ if eyelinkMode
     EyelinkDoDriftCorrection(el);
     
     eye_used = Eyelink('EyeAvailable');
-
+    
     try
         switch eye_used
             case el.BINOCULAR
@@ -167,8 +200,228 @@ if eyelinkMode
     end
     
     calibrateCkeck = tic;
-    pause(1); % wait a little bit, in case the key press during calibration influence the following keyboard check
+    pause(0.5); % wait a little bit, in case the key press during calibration influence the following keyboard check
 end
+
+keyReleased = true;
+%% main part
+while true
+    % keyboard function
+    [keyIsDown, ~, keyCode]=KbCheck;
+    if keyReleased
+        if keyIsDown
+            keyReleased = false;
+            if keyCode(skipKey)
+                metrix = starMetrix{mod(metrixNum,length(starMetrix))+1};
+                metrixNum = metrixNum+1 ;
+            end
+            
+            if keyCode(upArror)
+                position = initialPosition;
+                ballPosition = initialBallPosition;
+            end
+            if keyCode(escape)
+                break
+            end
+            
+            if keyCode(pageUp)
+                TRIALINFO.deviation = TRIALINFO.deviation + deviationAdjust;
+                disp(['binocular deviation: ' num2str(TRIALINFO.deviation)]);
+                calculateFrustum();
+            end
+            if keyCode(pageDown)
+                if TRIALINFO.deviation > deviationAdjust
+                    TRIALINFO.deviation = TRIALINFO.deviation - deviationAdjust;
+                    disp(['binocular deviation: ' num2str(TRIALINFO.deviation)]);
+                    calculateFrustum();
+                end
+            end
+            
+            if keyCode(leftKey)
+                velocityi  = velocity - TRIALINFO.acceleration;
+                if abs(velocity)<=TRIALINFO.maxVelocity
+                    velocity = velocityi;
+                end
+            end
+            if keyCode(rightKey)
+                velocityi  = velocity + TRIALINFO.acceleration;
+                if abs(velocity)<=TRIALINFO.maxVelocity
+                    velocity = velocityi;
+                end
+            end
+            
+            if eyelinkMode
+                if keyCode(cKey)
+                    EyelinkDoTrackerSetup(el);
+                    % do a final check of calibration using driftcorrection
+                    EyelinkDoDriftCorrection(el);
+                    
+                    Eyelink('StartRecording');
+                    Eyelink('message', 'Force calibration finished');
+                    error=Eyelink('checkrecording'); 		% Check recording status */
+                    if(error~=0)
+                        fprintf('Eyelink checked wrong status.\n');
+                        cleanup;  % cleanup function
+                        Eyelink('ShutDown');
+                        Screen('CloseAll');
+                    end
+                    WaitSecs(0.3); % wait a bit
+                end
+                if keyCode(markerKey)
+                    Eyelink('message', ['Marker ' num2str(markerNum)]);
+                    markerNum = markerNum+1;
+                end
+            end
+            
+            if keyCode(enterKey)
+                velocity = [0 0 0];
+                ballVelocity = [0 0 0];
+            end
+            
+            if keyCode(ballUpKey)
+                ballVelocityi = ballVelocity + [0 1 0] .* TRIALINFO.ballAcceleration;
+                if abs(ballVelocityi)<=TRIALINFO.maxVelocity
+                    ballVelocity = ballVelocityi;
+                end
+            end
+            if keyCode(ballDownKey)
+                ballVelocityi = ballVelocity + [0 -1 0] .* TRIALINFO.ballAcceleration;
+                if abs(ballVelocityi)<=TRIALINFO.maxVelocity
+                    ballVelocity = ballVelocityi;
+                end
+            end
+            if keyCode(ballRightKey)
+                ballVelocityi = ballVelocity + [1 0 0] .* TRIALINFO.ballAcceleration;
+                if abs(ballVelocityi)<=TRIALINFO.maxVelocity
+                    ballVelocity = ballVelocityi;
+                end
+            end
+            if keyCode(ballLeftKey)
+                ballVelocityi = ballVelocity + [-1 0 0] .* TRIALINFO.ballAcceleration;
+                if abs(ballVelocityi)<=TRIALINFO.maxVelocity
+                    ballVelocity = ballVelocityi;
+                end
+            end
+            
+            if keyCode(Fence2DKey)
+                Fence3D = false;
+                disp('2D fence');
+            elseif keyCode(Fence3DKey)
+                Fence3D = true;
+                disp('3D fence');
+            end
+            
+            if keyCode(fenceWidthIncrease)
+                TRIALINFO.fenceWidth = TRIALINFO.fenceWidth+fenceModifySpeed;  % cm
+                TRIALINFO.fenceInterval = TRIALINFO.fenceInterval+fenceModifySpeed; % cm
+                disp(['Fence width: ' num2str( TRIALINFO.fenceWidth)]);
+                disp(['Fence interval: ' num2str( TRIALINFO.fenceInterval)]);
+            end
+            if keyCode(fenceWidthDecrease)
+                TRIALINFO.fenceWidth = TRIALINFO.fenceWidth-fenceModifySpeed;  % cm
+                TRIALINFO.fenceInterval = TRIALINFO.fenceInterval-fenceModifySpeed; % cm
+                disp(['Fence width: ' num2str( TRIALINFO.fenceWidth)]);
+                disp(['Fence interval: ' num2str( TRIALINFO.fenceInterval)]);
+            end
+        end
+    end
+    if ~keyIsDown
+        keyReleased = true;
+    end
+    
+    % calculate current position
+    positioni = position + velocity;
+    ballPositioni = ballPosition + ballVelocity;
+    if min(positioni(1:2))>=min(TRIALINFO.movingBox) && max(positioni(1:2))<=max(TRIALINFO.movingBox)
+        position = positioni;
+    end
+    if min(ballPositioni(1:2))>=min(TRIALINFO.movingBox) && max(ballPositioni(1:2))<=max(TRIALINFO.movingBox)
+        ballPosition = ballPositioni;
+    end
+    
+    %% start drawing
+    CalculateBall(metrix,ballPosition,ballSize,starSize);
+    
+    Screen('BeginOpenGL',win);
+    glClear(GL.DEPTH_BUFFER_BIT);
+    glClear(GL.COLOR_BUFFER_BIT);
+    
+    % left eye
+    glColorMask(GL.TRUE, GL.FALSE, GL.FALSE, GL.FALSE);
+    glMatrixMode(GL.PROJECTION);
+    glLoadIdentity;
+    glFrustum( FRUSTUM.sinisterLeft,FRUSTUM.sinisterRight, FRUSTUM.bottom, FRUSTUM.top, FRUSTUM.clipNear, FRUSTUM.clipFar);
+    glMatrixMode(GL.MODELVIEW);
+    glLoadIdentity;
+    gluLookAt(position(1)-TRIALINFO.deviation,position(2),position(3),...
+        position(1)-TRIALINFO.deviation,position(2),position(3)-SCREEN.distance, ...
+        0,1,0)
+
+    glClearColor(0,0,0,0);
+    glColor3f(1.0,1.0,0.0);
+    DrawDots3D(win,[STARDATA.x ; STARDATA.y; STARDATA.z]);
+    
+    glEnable(GL.BLEND);
+    glBlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+    
+    if Fence3D
+        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,win);
+    end
+    
+    % right eye
+    glColorMask(GL.FALSE, GL.TRUE, GL.FALSE, GL.FALSE);
+    glMatrixMode(GL.PROJECTION);
+    glLoadIdentity;
+    glFrustum( FRUSTUM.dexterLeft,FRUSTUM.dexterRight, FRUSTUM.bottom, FRUSTUM.top, FRUSTUM.clipNear, FRUSTUM.clipFar);
+    glMatrixMode(GL.MODELVIEW);
+    glLoadIdentity;
+    gluLookAt(position(1)+TRIALINFO.deviation,position(2),position(3),...
+        position(1)+TRIALINFO.deviation,position(2),position(3)-SCREEN.distance,...
+        0,1,0)
+    glClearColor(0,0,0,0);
+    glColor3f(1.0,1.0,0.0);
+    DrawDots3D(win,[STARDATA.x ; STARDATA.y; STARDATA.z]);
+    
+    if ~Fence3D
+        Screen('EndOpenGL',win);
+        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,win);
+    else
+        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,win);
+        Screen('EndOpenGL',win);
+    end
+    
+    Screen('DrawingFinished',win);
+    Screen('Flip',win,0,0);
+end
+
+if eyelinkMode
+    
+    Eyelink('StopRecording');
+    Eyelink('CloseFile');
+    try
+        fprintf('Receiving data file ''%s''\n',fileName);
+        status=Eyelink('ReceiveFile',tempName ,saveDir,1);
+        if status > 0
+            fprintf('ReceiveFile status %d\n ', status);
+        end
+        if exist(fileName, 'file')==2
+            fprintf('Data file ''%s'' can be found in '' %s\n',fileName, pwd);
+        end
+    catch
+        fprintf('Problem receiving data file ''%s''\n',fileName);
+    end
+    
+    cd (saveDir);
+    save(fullfile(saveDir, fileName));
+    movefile(fullfile(saveDir,[tempName,'.edf']),fullfile(saveDir,[fileName,'.edf']));
+    Eyelink('ShutDown');
+end
+
+% save(fullfile(saveDir,fileName),'TRIALINFO');
+
+Screen('CloseAll');
+sca;
+clearvars;
 
 %% functions
 function cleanup
