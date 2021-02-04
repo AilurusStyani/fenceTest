@@ -432,7 +432,7 @@ if eyelinkMode
     Eyelink('ShutDown');
 end
 
-save(fullfile(saveDir,fileName),'TRIALINFO','cameraIndex','ballIndex','SCREEN');
+save(fullfile(saveDir,fileName),'TRIALINFO','cameraIndex','ballIndex','SCREEN','marker');
 
 Screen('CloseAll');
 sca;
