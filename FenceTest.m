@@ -19,11 +19,11 @@ curdir = pwd;
 % for SCREEN
 SCREEN.distance = 60;% cm
 
-TRIALINFO.deviation = 6.3; % initial binocular deviation, m
-deviationAdjust     = 0.2; % how fast to adjust the deviation by key pressing, m
+TRIALINFO.deviation = 6.3; % initial binocular deviation, cm
+deviationAdjust     = 0.2; % how fast to adjust the deviation by key pressing, cm
 
-TRIALINFO.fenceWidth = 5;  % cm
-TRIALINFO.fenceInterval = 5; % cm
+TRIALINFO.fenceWidth = 1;  % cm
+TRIALINFO.fenceInterval = 6; % cm
 fenceModifySpeed = 1;
 
 % for movement
@@ -73,11 +73,7 @@ metrix = starMetrix{mod(metrixNum,length(starMetrix))+1};
 CalculateBall(metrix,ballPosition,ballSize,starSize);
 
 %% Initial OpenGL
-if eyelinkMode
-    Screen('Preference', 'SkipSyncTests', 0); % for recording
-else
-    Screen('Preference', 'SkipSyncTests', 1);
-end
+Screen('Preference', 'SkipSyncTests', 0); % for recording
 
 AssertOpenGL;
 InitializeMatlabOpenGL;
@@ -204,6 +200,13 @@ if eyelinkMode
 end
 
 keyReleased = true;
+frameNum = 0;
+marker = [];
+
+cameraIndex.position = [];
+cameraIndex.velocity = [];
+ballIndex.position = [];
+ballIndex.velocity = [];
 %% main part
 while true
     % keyboard function
@@ -270,6 +273,7 @@ while true
                 if keyCode(markerKey)
                     Eyelink('message', ['Marker ' num2str(markerNum)]);
                     markerNum = markerNum+1;
+                    marker = cat(1,marker,[markerNum, frameNum]);
                 end
             end
             
@@ -334,9 +338,15 @@ while true
     ballPositioni = ballPosition + ballVelocity;
     if min(positioni(1:2))>=min(TRIALINFO.movingBox) && max(positioni(1:2))<=max(TRIALINFO.movingBox)
         position = positioni;
+    else
+        velocity = -velocity;
+        ballVelocity = -ballVelocity;
     end
     if min(ballPositioni(1:2))>=min(TRIALINFO.movingBox) && max(ballPositioni(1:2))<=max(TRIALINFO.movingBox)
         ballPosition = ballPositioni;
+    else
+        velocity = -velocity;
+        ballVelocity = -ballVelocity;
     end
     
     %% start drawing
@@ -356,7 +366,6 @@ while true
     gluLookAt(position(1)-TRIALINFO.deviation,position(2),position(3),...
         position(1)-TRIALINFO.deviation,position(2),position(3)-SCREEN.distance, ...
         0,1,0)
-
     glClearColor(0,0,0,0);
     glColor3f(1.0,1.0,0.0);
     DrawDots3D(win,[STARDATA.x ; STARDATA.y; STARDATA.z]);
@@ -392,6 +401,12 @@ while true
     
     Screen('DrawingFinished',win);
     Screen('Flip',win,0,0);
+    
+    cameraIndex.position = cat(1,cameraIndex.position,position);
+    cameraIndex.velocity = cat(1,cameraIndex.velocity,velocity);
+    ballIndex.position = cat(1,ballIndex.position,ballPosition);
+    ballIndex.velocity = cat(1,ballIndex.velocity,ballVelocity);
+    frameNum = frameNum+1;
 end
 
 if eyelinkMode
@@ -417,7 +432,7 @@ if eyelinkMode
     Eyelink('ShutDown');
 end
 
-% save(fullfile(saveDir,fileName),'TRIALINFO');
+save(fullfile(saveDir,fileName),'TRIALINFO','cameraIndex','ballIndex','SCREEN');
 
 Screen('CloseAll');
 sca;
