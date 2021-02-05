@@ -22,20 +22,20 @@ SCREEN.distance = 60;% cm
 TRIALINFO.deviation = 6.3; % initial binocular deviation, cm
 deviationAdjust     = 0.2; % how fast to adjust the deviation by key pressing, cm
 
-TRIALINFO.fenceWidth = 1;  % cm
-TRIALINFO.fenceInterval = 6; % cm
-fenceModifySpeed = 1;
+TRIALINFO.fenceWidth = 0.5;  % cm
+TRIALINFO.fenceInterval = 3; % cm
+fenceModifySpeed = 0.1;
 
 % for movement
 initialPosition = [0 0 0];
 velocity = [0 0 0];
-TRIALINFO.acceleration   = [1 0 0];
+TRIALINFO.acceleration   = [0.5 0 0];
 
 initialBallPosition = [0 0 -200];
 ballVelocity = [0 0 0];
 ballSize = 10; % cm
 starSize = 0.8; % cm
-TRIALINFO.ballAcceleration = [1 1 0];
+TRIALINFO.ballAcceleration = [0.5 0.5 0];
 
 TRIALINFO.maxVelocity = 10;
 TRIALINFO.movingBox = [-100 100];
@@ -64,6 +64,9 @@ markerKey = KbName('m');
 pageUp = KbName('pageup'); % increase binocular deviation
 pageDown = KbName('pagedown'); % decrease binocular deviation
 
+ballNearKey = KbName('z');
+ballFarKey = KbName('x');
+
 metrixNum = 0;
 markerNum = 0;
 position = initialPosition;
@@ -73,7 +76,11 @@ metrix = starMetrix{mod(metrixNum,length(starMetrix))+1};
 CalculateBall(metrix,ballPosition,ballSize,starSize);
 
 %% Initial OpenGL
-Screen('Preference', 'SkipSyncTests', 0); % for recording
+if eyelinkMode
+    Screen('Preference', 'SkipSyncTests', 0); % for recording
+else
+    Screen('Preference', 'SkipSyncTests', 1);
+end
 
 AssertOpenGL;
 InitializeMatlabOpenGL;
@@ -105,12 +112,6 @@ SCREEN.refreshRate = Screen('NominalFrameRate', SCREEN.screenId);
 
 calculateFrustum();
 % calculateCondition();
-
-Screen('BeginOpenGL', win);
-% Enable proper occlusion handling via depth tests:
-glEnable(GL.DEPTH_TEST);
-glClear;
-Screen('EndOpenGL', win);
 
 %% initial eyelink
 if eyelinkMode
@@ -349,6 +350,15 @@ while true
         ballVelocity = -ballVelocity;
     end
     
+%      [keyIsDown, ~, keyCode]=KbCheck;
+%      if keyIsDown
+%          if keyCode(ballNearKey)
+%              ballPosition = ballPosition+[0 0 1]
+%          elseif keyCode(ballFarKey)
+%              ballPosition = ballPosition+[0 0 -1]
+%          end
+%      end
+    
     %% start drawing
     CalculateBall(metrix,ballPosition,ballSize,starSize);
     
@@ -363,8 +373,8 @@ while true
     glFrustum( FRUSTUM.sinisterLeft,FRUSTUM.sinisterRight, FRUSTUM.bottom, FRUSTUM.top, FRUSTUM.clipNear, FRUSTUM.clipFar);
     glMatrixMode(GL.MODELVIEW);
     glLoadIdentity;
-    gluLookAt(position(1)-TRIALINFO.deviation,position(2),position(3),...
-        position(1)-TRIALINFO.deviation,position(2),position(3)-SCREEN.distance, ...
+    gluLookAt(position(1)-TRIALINFO.deviation/2,position(2),position(3),...
+        position(1)-TRIALINFO.deviation/2,position(2),position(3)-SCREEN.distance, ...
         0,1,0)
     glClearColor(0,0,0,0);
     glColor3f(1.0,1.0,0.0);
@@ -374,7 +384,7 @@ while true
     glBlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
     
     if Fence3D
-        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,win);
+        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,TRIALINFO.movingBox+[-30 30],win);
     end
     
     % right eye
@@ -384,8 +394,8 @@ while true
     glFrustum( FRUSTUM.dexterLeft,FRUSTUM.dexterRight, FRUSTUM.bottom, FRUSTUM.top, FRUSTUM.clipNear, FRUSTUM.clipFar);
     glMatrixMode(GL.MODELVIEW);
     glLoadIdentity;
-    gluLookAt(position(1)+TRIALINFO.deviation,position(2),position(3),...
-        position(1)+TRIALINFO.deviation,position(2),position(3)-SCREEN.distance,...
+    gluLookAt(position(1)+TRIALINFO.deviation/2,position(2),position(3),...
+        position(1)+TRIALINFO.deviation/2,position(2),position(3)-SCREEN.distance,...
         0,1,0)
     glClearColor(0,0,0,0);
     glColor3f(1.0,1.0,0.0);
@@ -393,9 +403,9 @@ while true
     
     if ~Fence3D
         Screen('EndOpenGL',win);
-        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,win);
+        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,TRIALINFO.movingBox+[-30 30],win);
     else
-        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,win);
+        drawFence(Fence3D,TRIALINFO.fenceWidth,TRIALINFO.fenceInterval,TRIALINFO.movingBox+[-30 30],win);
         Screen('EndOpenGL',win);
     end
     
